@@ -1,0 +1,19 @@
+{
+  "schema": 1,
+  "engine": "chromium",
+  "tag": "chromium-157.0.8103.50-r1",
+  "version": "157.0.8103.50",
+  "milestone": 157,
+  "source_commit": "049750111b1e5c11565c792b2aeed5541f332bad",
+  "v8_commit": "440c1c463e2e528c309af5067952e7b11631507f",
+  "repository": "idawnlight/chromium_antidetect_patch",
+  "assets": {
+    "linux-x86_64": {
+      "name": "chromium-157.0.8103.50-stealth-linux-x86_64.tar.gz",
+      "url": "https://github.com/idawnlight/chromium_antidetect_patch/releases/download/chromium-157.0.8103.50-r1/chromium-157.0.8103.50-stealth-linux-x86_64.tar.gz",
+      "size_bytes": 236108893,
+      "sha256": "90f3b9547d03e31a373d02c5c20943b6f455d8aeca34a22bd3880acbca602b3b",
+      "entry_rel": "chrome"
+    }
+  }
+}
