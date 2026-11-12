@@ -51,6 +51,20 @@ def test_seal_metadata_is_valid() -> None:
     assert len(asset["sha256"]) == 64
     assert asset["size_bytes"] > 100_000_000
     assert asset["entry_rel"] == "chrome"
+    assert asset["url"].startswith(
+        "https://github.com/idawnlight/chromium_antidetect_patch/releases/download/"
+    )
+
+
+def test_binary_downloader_uses_direct_public_release_only() -> None:
+    import inspect
+    from invisible_chromium import binary
+
+    src = inspect.getsource(binary)
+    assert "api.github.com" not in src
+    assert "gh auth" not in src
+    assert "GITHUB_TOKEN" not in src
+    assert "GH_TOKEN" not in src
 
 
 def test_key_table_mappings() -> None:
