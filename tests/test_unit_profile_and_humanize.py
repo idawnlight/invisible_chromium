@@ -46,7 +46,7 @@ def test_hardware_profile_seed_determinism_and_diversity() -> None:
 
 def test_seal_metadata_is_valid() -> None:
     seal = load_seal()
-    assert seal["version"] == "157.0.8103.50"
+    assert seal["version"] == "157.0.8103.78"
     asset = seal["assets"]["linux-x86_64"]
     assert len(asset["sha256"]) == 64
     assert asset["size_bytes"] > 100_000_000
