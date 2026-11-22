@@ -46,7 +46,7 @@ def test_hardware_profile_seed_determinism_and_diversity() -> None:
 
 def test_seal_metadata_is_valid() -> None:
     seal = load_seal()
-    assert seal["version"] == "157.0.8103.78"
+    assert seal["version"] == "158.0.8127.36"
     asset = seal["assets"]["linux-x86_64"]
     assert len(asset["sha256"]) == 64
     assert asset["size_bytes"] > 100_000_000
@@ -106,3 +106,123 @@ def test_human_controller_seed_reproducibility() -> None:
     assert 400.0 < land1[0] < 540.0
     assert 300.0 < land1[1] < 344.0
     assert (round(land1[0], 3), round(land1[1], 3)) != (470.0, 322.0)
+
+
+def test_pipe_cdp_post_and_auth_callback_do_not_deadlock_reader() -> None:
+    import json
+    import os
+    import threading
+    from invisible_chromium.browser import InvisibleChromium
+    from invisible_chromium.cdp import PipeCDPConnection
+
+    c_r, s_w = os.pipe()
+    s_r, c_w = os.pipe()
+    conn = PipeCDPConnection(c_r, c_w)
+    received: list[dict] = []
+    got_two = threading.Event()
+
+    def peer_reader() -> None:
+        buf = bytearray()
+        while not got_two.is_set():
+            chunk = os.read(s_r, 4096)
+            if not chunk:
+                break
+            buf.extend(chunk)
+            while True:
+                idx = buf.find(0)
+                if idx < 0:
+                    break
+                msg = json.loads(bytes(buf[:idx]).decode("utf-8"))
+                del buf[: idx + 1]
+                received.append(msg)
+                if len(received) >= 2:
+                    got_two.set()
+
+    t = threading.Thread(target=peer_reader, daemon=True)
+    t.start()
+    try:
+        br = InvisibleChromium.__new__(InvisibleChromium)
+        br._cdp = conn
+        br._proxy_user = "alice"
+        br._proxy_pass = "secret"
+        conn.subscribe(br._on_browser_event)
+
+        for ev in (
+            {
+                "sessionId": "s1",
+                "method": "Fetch.requestPaused",
+                "params": {"requestId": "r1"},
+            },
+            {
+                "sessionId": "s1",
+                "method": "Fetch.authRequired",
+                "params": {"requestId": "r2"},
+            },
+        ):
+            os.write(s_w, json.dumps(ev).encode("utf-8") + b"\x00")
+
+        assert got_two.wait(timeout=2.0), f"expected 2 non-blocking Fetch replies, got {received}"
+        assert [m["method"] for m in received] == [
+            "Fetch.continueRequest",
+            "Fetch.continueWithAuth",
+        ]
+    finally:
+        conn.close()
+        for fd in (s_w, s_r):
+            try:
+                os.close(fd)
+            except OSError:
+                pass
+
+
+def test_browser_cookies_url_filter_and_page_goto_commit_and_timeout() -> None:
+    import pytest
+    from invisible_chromium.browser import InvisibleChromium
+    from invisible_chromium.page import ChromiumPage
+
+    class FakeCDP:
+        def __init__(self, never_load: bool = False) -> None:
+            self.never_load = never_load
+            self.subs = []
+
+        def subscribe(self, cb):
+            self.subs.append(cb)
+            return lambda: None
+
+        def send(self, method: str, params=None, *, session_id=None, timeout=30.0):
+            if method == "Storage.getCookies":
+                return {
+                    "cookies": [
+                        {"name": "a", "domain": ".alpha.test", "path": "/", "secure": False},
+                        {"name": "b", "domain": "beta.test", "path": "/app", "secure": True},
+                    ]
+                }
+            if method in ("Page.enable", "Runtime.enable"):
+                return {}
+            if method == "Page.setLifecycleEventsEnabled":
+                return {}
+            if method == "Page.getFrameTree":
+                return {"frameTree": {"frame": {"id": "F1"}}}
+            if method == "Page.createIsolatedWorld":
+                return {"executionContextId": 7}
+            if method == "Page.navigate":
+                for cb in list(self.subs):
+                    cb(session_id, "Page.frameNavigated", {"frame": {"id": "F1"}})
+                return {"frameId": "F1"}
+            if method == "Runtime.evaluate":
+                return {"result": {"value": "loading" if self.never_load else "complete"}}
+            return {}
+
+    br = InvisibleChromium.__new__(InvisibleChromium)
+    br._cdp = FakeCDP()
+    assert [c["name"] for c in br.cookies(["http://sub.alpha.test/home"])] == ["a"]
+    assert [c["name"] for c in br.cookies(["http://beta.test/app/x"])] == []
+    assert [c["name"] for c in br.cookies(["https://beta.test/app/x"])] == ["b"]
+
+    fast_cdp = FakeCDP(never_load=True)
+    page = ChromiumPage(fast_cdp, target_id="T1", session_id="S1", seed=1, page_number=1, humanize=False, max_motion_seconds=0.1)
+    # commit succeeds immediately via frameNavigated even while readyState is still "loading"
+    assert page.goto("https://alpha.test/", wait_until="commit", timeout=0.4) == {"frameId": "F1"}
+    # load raises TimeoutError when neither load event nor readyState=='complete' arrives
+    with pytest.raises(TimeoutError):
+        page.goto("https://alpha.test/", wait_until="load", timeout=0.25)

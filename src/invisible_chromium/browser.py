@@ -278,32 +278,26 @@ class InvisibleChromium:
         if method == "Fetch.authRequired" and self._cdp is not None:
             req_id = params.get("requestId")
             if req_id:
-                try:
-                    self._cdp.send(
-                        "Fetch.continueWithAuth",
-                        {
-                            "requestId": req_id,
-                            "authChallengeResponse": {
-                                "response": "ProvideCredentials",
-                                "username": self._proxy_user or "",
-                                "password": self._proxy_pass or "",
-                            },
+                self._cdp.post(
+                    "Fetch.continueWithAuth",
+                    {
+                        "requestId": req_id,
+                        "authChallengeResponse": {
+                            "response": "ProvideCredentials",
+                            "username": self._proxy_user or "",
+                            "password": self._proxy_pass or "",
                         },
-                        session_id=session_id,
-                    )
-                except Exception:
-                    pass
+                    },
+                    session_id=session_id,
+                )
         elif method == "Fetch.requestPaused" and self._cdp is not None:
             req_id = params.get("requestId")
             if req_id:
-                try:
-                    self._cdp.send(
-                        "Fetch.continueRequest",
-                        {"requestId": req_id},
-                        session_id=session_id,
-                    )
-                except Exception:
-                    pass
+                self._cdp.post(
+                    "Fetch.continueRequest",
+                    {"requestId": req_id},
+                    session_id=session_id,
+                )
 
     @property
     def version(self) -> dict[str, Any]:
@@ -358,10 +352,44 @@ class InvisibleChromium:
     def cookies(self, urls: list[str] | None = None) -> list[dict[str, Any]]:
         if self._cdp is None:
             raise RuntimeError("Browser not started")
-        params: dict[str, Any] = {}
-        if urls:
-            params["urls"] = list(urls)
-        return list(self._cdp.send("Storage.getCookies", params).get("cookies", []))
+        all_cookies = list(self._cdp.send("Storage.getCookies").get("cookies", []))
+        if urls is None:
+            return all_cookies
+        if not urls:
+            return []
+        from urllib.parse import urlsplit
+
+        parsed = [urlsplit(u) for u in urls]
+
+        def _matches(cookie: dict[str, Any]) -> bool:
+            c_domain = str(cookie.get("domain") or "").lower()
+            c_path = str(cookie.get("path") or "/")
+            c_secure = bool(cookie.get("secure"))
+            host_only = not c_domain.startswith(".")
+            bare_dom = c_domain.lstrip(".")
+            for u in parsed:
+                host = (u.hostname or "").lower()
+                if not host or not bare_dom:
+                    continue
+                if c_secure and u.scheme.lower() != "https":
+                    continue
+                if host_only:
+                    if host != bare_dom:
+                        continue
+                else:
+                    if host != bare_dom and not host.endswith("." + bare_dom):
+                        continue
+                u_path = u.path or "/"
+                if not (
+                    u_path == c_path
+                    or (c_path.endswith("/") and u_path.startswith(c_path))
+                    or u_path.startswith(c_path + "/")
+                ):
+                    continue
+                return True
+            return False
+
+        return [c for c in all_cookies if _matches(c)]
 
     def add_cookies(self, cookies: list[dict[str, Any]]) -> None:
         if self._cdp is None:

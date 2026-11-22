@@ -1,18 +1,18 @@
 {
   "schema": 1,
   "engine": "chromium",
-  "tag": "chromium-157.0.8103.78-r1",
-  "version": "157.0.8103.78",
-  "milestone": 157,
-  "source_commit": "4b3d0dabb8250b6f152d2d85d79e7706e309d087",
-  "v8_commit": "307108153d1e35e6e74528ee55f97b0cd59bf182",
+  "tag": "chromium-158.0.8127.36-r1",
+  "version": "158.0.8127.36",
+  "milestone": 158,
+  "source_commit": "14d6f648e8cd7ad750a4044200ce94d3321be260",
+  "v8_commit": "b601a2347f005e8bfadd32f285df97ffba5cf1bd",
   "repository": "idawnlight/chromium_antidetect_patch",
   "assets": {
     "linux-x86_64": {
-      "name": "chromium-157.0.8103.78-stealth-linux-x86_64.tar.gz",
-      "url": "https://github.com/idawnlight/chromium_antidetect_patch/releases/download/chromium-157.0.8103.78-r1/chromium-157.0.8103.78-stealth-linux-x86_64.tar.gz",
-      "size_bytes": 236142263,
-      "sha256": "3a98ee9ab334c02abc4d2ef944d08a58be7cae53ba80f3f46ff1f4842aa052c0",
+      "name": "chromium-158.0.8127.36-stealth-linux-x86_64.tar.gz",
+      "url": "https://github.com/idawnlight/chromium_antidetect_patch/releases/download/chromium-158.0.8127.36-r1/chromium-158.0.8127.36-stealth-linux-x86_64.tar.gz",
+      "size_bytes": 242562642,
+      "sha256": "51340512da85051e81df1dd43b1aba8017ed5cd787655d1e4c191f23aa909c4f",
       "entry_rel": "chrome"
     }
   }

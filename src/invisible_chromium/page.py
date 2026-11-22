@@ -186,6 +186,9 @@ class ChromiumPage:
                 with self._lifecycle_cond:
                     self._main_frame_id = frame.get("id", self._main_frame_id)
                     self._utility_context_id = None
+                    self._lifecycle_events.setdefault(self._main_frame_id, set()).add(
+                        "commit"
+                    )
                     self._lifecycle_cond.notify_all()
         elif method == "Page.lifecycleEvent":
             fid = params.get("frameId", "")
@@ -251,30 +254,38 @@ class ChromiumPage:
 
         frame_id = nav.get("frameId") or self._main_frame_id
         deadline = time.monotonic() + timeout
+        settled = False
         with self._lifecycle_cond:
             while True:
                 seen = self._lifecycle_events.get(frame_id, set())
                 if target_event in seen:
+                    settled = True
                     break
                 remaining = deadline - time.monotonic()
                 if remaining <= 0:
                     break
                 self._lifecycle_cond.wait(timeout=min(remaining, 0.25))
 
-        # Confirm document readiness in the Isolated World as a fallback for cached/instant pages.
-        ready_Target = (
-            ("interactive", "complete")
-            if wait_until.lower() in ("commit", "domcontentloaded")
-            else ("complete",)
-        )
-        while time.monotonic() < deadline:
-            try:
-                state = self.evaluate_isolated("document.readyState")
-                if state in ready_Target:
-                    break
-            except Exception:
-                pass
-            time.sleep(0.05)
+        if not settled and wait_until.lower() != "networkidle":
+            ready_target = (
+                ("interactive", "complete")
+                if wait_until.lower() in ("commit", "domcontentloaded")
+                else ("complete",)
+            )
+            while time.monotonic() < deadline:
+                try:
+                    state = self.evaluate_isolated("document.readyState")
+                    if state in ready_target:
+                        settled = True
+                        break
+                except Exception:
+                    pass
+                time.sleep(0.05)
+
+        if not settled:
+            raise TimeoutError(
+                f"Navigation to {url} timed out after {timeout:.1f}s waiting for {wait_until!r}"
+            )
 
         return nav
 
@@ -287,25 +298,31 @@ class ChromiumPage:
 
     def wait_for_load_state(self, state: str = "load", *, timeout: float = 30.0) -> None:
         target_event = {
+            "commit": "commit",
             "domcontentloaded": "DOMContentLoaded",
             "load": "load",
             "networkidle": "networkIdle",
         }.get(state.lower(), "load")
         deadline = time.monotonic() + timeout
-        with self._lifecycle_cond:
-            while time.monotonic() < deadline:
+        while time.monotonic() < deadline:
+            with self._lifecycle_cond:
                 if target_event in self._lifecycle_events.get(self._main_frame_id, set()):
                     return
-                if target_event in ("DOMContentLoaded", "load"):
-                    try:
-                        rs = self.evaluate_isolated("document.readyState")
-                        if rs == "complete" or (
-                            target_event == "DOMContentLoaded" and rs == "interactive"
-                        ):
-                            return
-                    except Exception:
-                        pass
-                self._lifecycle_cond.wait(timeout=0.1)
+            if target_event in ("DOMContentLoaded", "load"):
+                try:
+                    rs = self.evaluate_isolated("document.readyState")
+                    if rs == "complete" or (
+                        target_event == "DOMContentLoaded" and rs == "interactive"
+                    ):
+                        return
+                except Exception:
+                    pass
+            with self._lifecycle_cond:
+                if target_event in self._lifecycle_events.get(self._main_frame_id, set()):
+                    return
+                rem = deadline - time.monotonic()
+                if rem > 0:
+                    self._lifecycle_cond.wait(timeout=min(rem, 0.1))
         raise TimeoutError(f"Timed out waiting for load state {state!r}")
 
     def _ensure_utility_world(self) -> int:

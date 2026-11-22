@@ -1,6 +1,6 @@
 # invisible-chromium
 
-Python stealth controller for patched Linux Desktop Chromium (`157.0.8103.78`), combining native Blink/V8/CDP C++ hardware normalization with `invisible_core` seed-deterministic human cursor trajectories and typing cadence.
+Python stealth controller for patched Linux Desktop Chromium (`158.0.8127.36`), combining native Blink/V8/CDP C++ hardware normalization with `invisible_core` seed-deterministic human cursor trajectories and typing cadence.
 
 ## Design Highlights
 

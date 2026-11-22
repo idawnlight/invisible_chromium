@@ -127,7 +127,7 @@ def test_pipe_launch_stealth_and_hardware_profile(local_server: str) -> None:
         timezone_id="Europe/Berlin",
         locale="en-US",
     ) as browser:
-        assert "157.0.8103.78" in browser.version["product"]
+        assert "158.0.8127.36" in browser.version["product"]
         page = browser.new_page()
         page.goto(f"{local_server}/")
 

@@ -106,6 +106,35 @@ class PipeCDPConnection:
             raise call.error
         return call.result or {}
 
+    def post(
+        self,
+        method: str,
+        params: dict[str, Any] | None = None,
+        *,
+        session_id: str | None = None,
+    ) -> None:
+        with self._state_lock:
+            if self._closed:
+                return
+            self._next_id += 1
+            msg_id = self._next_id
+
+        payload: dict[str, Any] = {"id": msg_id, "method": method}
+        if params:
+            payload["params"] = params
+        if session_id is not None:
+            payload["sessionId"] = session_id
+
+        encoded = json.dumps(payload, separators=(",", ":")).encode("utf-8") + b"\x00"
+        try:
+            with self._write_lock:
+                view = memoryview(encoded)
+                while view:
+                    written = os.write(self._write_fd, view)
+                    view = view[written:]
+        except OSError:
+            pass
+
     def _reader_loop(self) -> None:
         buf = bytearray()
         try:
