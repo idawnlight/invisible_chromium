@@ -290,3 +290,72 @@ def test_cookies_headers_and_persistent_user_data_dir(local_server: str, tmp_pat
         page2.goto(f"{local_server}/")
         val = page2.evaluate("localStorage.getItem('persisted_key')")
         assert val == "survived_restart"
+
+
+@pytest.mark.browser
+def test_focus_mode_control_a_and_control_v_native_clipboard_paste(local_server: str) -> None:
+    import os
+    import shutil
+    import subprocess
+
+    query = '\u4e2d\u6587 "quotes" \'single\' & + = ? # % \\ / \U0001f600'
+    with InvisibleChromium(seed=505, headless=True) as browser:
+        page = browser.new_page()
+        page.goto(f"{local_server}/")
+        page.evaluate("document.getElementById('field').value = 'replace this old query'")
+
+        vdisplay = getattr(browser, "_desktop", None)
+        xclip_proc = None
+        try:
+            if vdisplay is not None and vdisplay.display and shutil.which("xclip"):
+                env = os.environ.copy()
+                env["DISPLAY"] = vdisplay.display
+                xclip_proc = subprocess.Popen(
+                    [
+                        "xclip",
+                        "-quiet",
+                        "-in",
+                        "-selection",
+                        "clipboard",
+                        "-target",
+                        "UTF8_STRING",
+                    ],
+                    stdin=subprocess.PIPE,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    env=env,
+                )
+                assert xclip_proc.stdin is not None
+                xclip_proc.stdin.write(query.encode("utf-8"))
+                xclip_proc.stdin.close()
+                out = subprocess.check_output(
+                    [
+                        "xclip",
+                        "-out",
+                        "-selection",
+                        "clipboard",
+                        "-target",
+                        "UTF8_STRING",
+                    ],
+                    env=env,
+                    timeout=5.0,
+                )
+                assert out.decode("utf-8") == query
+            else:
+                pytest.skip("xclip or virtual desktop unavailable")
+
+            # Use locator.focus() (no mouse click) to guard against X11 KP_Add (86) browser zoom shortcut swallowing Ctrl+V.
+            page.locator("#field").focus()
+            page.evaluate("window.__events.keys = []")
+            page.keyboard.press("Control+KeyA")
+            sel = page.evaluate(
+                "(() => { const el = document.getElementById('field'); return [el.selectionStart, el.selectionEnd]; })()"
+            )
+            assert sel == [0, 22]
+
+            page.keyboard.press("Control+KeyV")
+            assert page.evaluate("document.getElementById('field').value") == query
+        finally:
+            if xclip_proc is not None and xclip_proc.poll() is None:
+                xclip_proc.terminate()
+                xclip_proc.wait(timeout=2.0)

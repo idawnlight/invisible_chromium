@@ -82,6 +82,9 @@ class Locator:
     def hover(self, *, timeout: float = 15.0) -> None:
         self._page.hover(self.selector, timeout=timeout)
 
+    def focus(self, *, timeout: float = 15.0) -> None:
+        self._page.focus(self.selector, timeout=timeout)
+
     def fill(self, value: str, *, timeout: float = 15.0) -> None:
         self._page.fill(self.selector, value, timeout=timeout)
 
@@ -537,6 +540,40 @@ class ChromiumPage:
         box = self._wait_actionable_box(selector, timeout=timeout)
         vp = self._viewport_size()
         self._human.approach_box(box, vp, self._emit_mouse_move)
+
+    def focus(self, selector: str, *, timeout: float = 15.0) -> None:
+        self.wait_for_selector(selector, state="attached", timeout=timeout)
+        self._cdp.send("Page.bringToFront", session_id=self.session_id)
+        ctx_id = self._ensure_utility_world()
+        res = self._cdp.send(
+            "Runtime.evaluate",
+            {
+                "expression": f"document.querySelector({json.dumps(selector)})",
+                "contextId": ctx_id,
+                "returnByValue": False,
+            },
+            session_id=self.session_id,
+        )
+        obj_id = (res.get("result") or {}).get("objectId")
+        if obj_id:
+            try:
+                self._cdp.send(
+                    "DOM.focus", {"objectId": obj_id}, session_id=self.session_id
+                )
+            finally:
+                self._cdp.send(
+                    "Runtime.releaseObject",
+                    {"objectId": obj_id},
+                    session_id=self.session_id,
+                )
+        else:
+            self.evaluate_isolated(
+                """(sel) => {
+                  const el = document.querySelector(sel);
+                  if (el && typeof el.focus === 'function') el.focus();
+                }""",
+                selector,
+            )
 
     def fill(
         self, selector: str, value: str, *, timeout: float = 15.0

@@ -50,7 +50,7 @@ CDP_BUTTON_MASK = {
 
 KEY_ALIASES = {
     "ShiftLeft": ("Shift",),
-    "ControlLeft": ("Control", "Ctrl"),
+    "ControlLeft": ("Control", "Ctrl", "ControlOrMeta"),
     "AltLeft": ("Alt",),
     "MetaLeft": ("Meta", "Command", "Super"),
     "Enter": ("\n", "\r"),
@@ -82,6 +82,7 @@ def _build_key_table() -> dict[str, dict[str, Any]]:
                 "text": s_key if len(s_key) == 1 else "",
                 "requires_shift": True,
             }
+            base_descr["shifted"] = shifted_descr
         table[code] = base_descr
         for alias in KEY_ALIASES.get(code, ()):
             table[alias] = base_descr
@@ -421,16 +422,23 @@ class HumanController:
                 shift_held = False
 
             char_text = info["text"]
+            loc = int(info["location"] or 0)
+            cdp_loc = loc if loc in (1, 2) else 0
+            is_keypad = True if loc == 3 else None
             dispatch_key(
                 type="keyDown" if char_text else "rawKeyDown",
                 key=info["key"],
                 code=info["code"],
                 windowsVirtualKeyCode=info["windowsVirtualKeyCode"],
-                nativeVirtualKeyCode=info["windowsVirtualKeyCode"],
-                location=info["location"],
+                location=cdp_loc,
+                isKeypad=is_keypad,
                 modifiers=self.modifier_mask,
                 text=char_text or None,
-                unmodifiedText=(char_text.lower() if char_text else None),
+                unmodifiedText=(
+                    char_text
+                    if char_text
+                    else (info["key"] if len(info["key"]) == 1 else None)
+                ),
                 timestamp=time.time(),
             )
             if dwell_ms > 0 and self.enabled:
@@ -440,8 +448,8 @@ class HumanController:
                 key=info["key"],
                 code=info["code"],
                 windowsVirtualKeyCode=info["windowsVirtualKeyCode"],
-                nativeVirtualKeyCode=info["windowsVirtualKeyCode"],
-                location=info["location"],
+                location=cdp_loc,
+                isKeypad=is_keypad,
                 modifiers=self.modifier_mask,
                 timestamp=time.time(),
             )
@@ -473,6 +481,7 @@ class HumanController:
             canonical = {
                 "Ctrl": "Control",
                 "Control": "Control",
+                "ControlOrMeta": "Control",
                 "Shift": "Shift",
                 "Alt": "Alt",
                 "Meta": "Meta",
@@ -480,23 +489,44 @@ class HumanController:
             }.get(mod_part, mod_part)
             mods.append(canonical)
             self._press_modifier(canonical, dispatch_key)
+            if self.enabled:
+                time.sleep(0.012)
 
         try:
-            info = KEY_TABLE.get(main_key)
+            lookup_key = main_key
+            if (
+                ("Control" in mods or "Meta" in mods)
+                and "Shift" not in mods
+                and len(lookup_key) == 1
+                and lookup_key.isascii()
+                and lookup_key.isupper()
+            ):
+                lookup_key = lookup_key.lower()
+            info = KEY_TABLE.get(lookup_key)
             if info is None:
                 raise ValueError(f"Unknown key name: {main_key!r}")
+            if "Shift" in mods and info.get("shifted"):
+                info = info["shifted"]
             has_ctrl_alt_meta = any(m in ("Control", "Alt", "Meta") for m in mods)
             char_text = "" if has_ctrl_alt_meta else info["text"]
+            unmod = (
+                char_text
+                if char_text
+                else (info["key"] if len(info["key"]) == 1 else None)
+            )
+            loc = int(info["location"] or 0)
+            cdp_loc = loc if loc in (1, 2) else 0
+            is_keypad = True if loc == 3 else None
             dispatch_key(
                 type="keyDown" if char_text else "rawKeyDown",
                 key=info["key"],
                 code=info["code"],
                 windowsVirtualKeyCode=info["windowsVirtualKeyCode"],
-                nativeVirtualKeyCode=info["windowsVirtualKeyCode"],
-                location=info["location"],
+                location=cdp_loc,
+                isKeypad=is_keypad,
                 modifiers=self.modifier_mask,
                 text=char_text or None,
-                unmodifiedText=info["text"] or None,
+                unmodifiedText=unmod,
                 timestamp=time.time(),
             )
             if self.enabled:
@@ -506,8 +536,8 @@ class HumanController:
                 key=info["key"],
                 code=info["code"],
                 windowsVirtualKeyCode=info["windowsVirtualKeyCode"],
-                nativeVirtualKeyCode=info["windowsVirtualKeyCode"],
-                location=info["location"],
+                location=cdp_loc,
+                isKeypad=is_keypad,
                 modifiers=self.modifier_mask,
                 timestamp=time.time(),
             )
@@ -518,28 +548,28 @@ class HumanController:
 
     def _press_modifier(self, mod: str, dispatch_key: Callable[..., None]) -> None:
         info = KEY_TABLE[mod]
+        loc = int(info["location"] or 0)
         self._active_modifiers.add(mod)
         dispatch_key(
             type="rawKeyDown",
             key=info["key"],
             code=info["code"],
             windowsVirtualKeyCode=info["windowsVirtualKeyCode"],
-            nativeVirtualKeyCode=info["windowsVirtualKeyCode"],
-            location=info["location"],
+            location=loc if loc in (1, 2) else 0,
             modifiers=self.modifier_mask,
             timestamp=time.time(),
         )
 
     def _release_modifier(self, mod: str, dispatch_key: Callable[..., None]) -> None:
         info = KEY_TABLE[mod]
+        loc = int(info["location"] or 0)
         self._active_modifiers.discard(mod)
         dispatch_key(
             type="keyUp",
             key=info["key"],
             code=info["code"],
             windowsVirtualKeyCode=info["windowsVirtualKeyCode"],
-            nativeVirtualKeyCode=info["windowsVirtualKeyCode"],
-            location=info["location"],
+            location=loc if loc in (1, 2) else 0,
             modifiers=self.modifier_mask,
             timestamp=time.time(),
         )

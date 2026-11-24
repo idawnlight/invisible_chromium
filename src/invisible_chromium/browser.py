@@ -328,6 +328,7 @@ class InvisibleChromium:
         )
         session_id = attached["sessionId"]
         self._cdp.send("Target.activateTarget", {"targetId": target_id})
+        self._cdp.send("Page.bringToFront", session_id=session_id)
 
         if self._proxy_user is not None:
             self._cdp.send(

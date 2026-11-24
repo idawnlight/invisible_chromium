@@ -226,3 +226,28 @@ def test_browser_cookies_url_filter_and_page_goto_commit_and_timeout() -> None:
     # load raises TimeoutError when neither load event nor readyState=='complete' arrives
     with pytest.raises(TimeoutError):
         page.goto("https://alpha.test/", wait_until="load", timeout=0.25)
+
+
+def test_press_combo_modifiers_omit_native_vk_and_map_numpad_keypad() -> None:
+    hc = HumanController(seed=123, enabled=False)
+    emitted: list[dict] = []
+    hc.press_combo("Control+KeyA", lambda **kw: emitted.append(kw))
+    hc.press_combo("Control+V", lambda **kw: emitted.append(kw))
+    hc.press_combo("NumpadEnter", lambda **kw: emitted.append(kw))
+
+    for ev in emitted:
+        assert "nativeVirtualKeyCode" not in ev
+
+    ctrl_d, a_d, a_u, ctrl_u = emitted[:4]
+    assert ctrl_d["modifiers"] == 2 and ctrl_d["type"] == "rawKeyDown"
+    assert a_d["modifiers"] == 2 and a_d["type"] == "rawKeyDown" and a_d["key"] == "a"
+    assert a_d["text"] is None and a_d["unmodifiedText"] == "a"
+    assert a_u["modifiers"] == 2 and ctrl_u["modifiers"] == 0
+
+    _, v_d, _, _ = emitted[4:8]
+    assert v_d["modifiers"] == 2 and v_d["key"] == "v" and v_d["code"] == "KeyV"
+    assert v_d["windowsVirtualKeyCode"] == 86 and v_d["text"] is None
+
+    numpad_d, numpad_u = emitted[8:10]
+    assert numpad_d["isKeypad"] is True and numpad_d["location"] == 0
+    assert numpad_u["isKeypad"] is True and numpad_u["location"] == 0
