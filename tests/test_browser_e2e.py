@@ -359,3 +359,28 @@ def test_focus_mode_control_a_and_control_v_native_clipboard_paste(local_server:
             if xclip_proc is not None and xclip_proc.poll() is None:
                 xclip_proc.terminate()
                 xclip_proc.wait(timeout=2.0)
+
+
+@pytest.mark.browser
+def test_renderer_crash_rejects_commands_immediately_and_recovers(local_server: str) -> None:
+    import time
+    from invisible_chromium.cdp import CDPError
+
+    with InvisibleChromium(seed=606, headless=True) as browser:
+        page = browser.new_page()
+        page.goto(f"{local_server}/")
+        with pytest.raises((CDPError, RuntimeError)):
+            page.goto("chrome://crash", timeout=5.0)
+
+        t0 = time.monotonic()
+        with pytest.raises(CDPError, match="crashed"):
+            page.evaluate("1 + 1")
+        assert (time.monotonic() - t0) < 1.0
+
+        t1 = time.monotonic()
+        with pytest.raises(CDPError, match="crashed"):
+            page.screenshot()
+        assert (time.monotonic() - t1) < 1.0
+
+        page.goto(f"{local_server}/")
+        assert page.title() == "Stealth E2E"

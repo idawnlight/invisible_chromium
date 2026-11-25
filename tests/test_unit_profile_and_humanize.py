@@ -251,3 +251,57 @@ def test_press_combo_modifiers_omit_native_vk_and_map_numpad_keypad() -> None:
     numpad_d, numpad_u = emitted[8:10]
     assert numpad_d["isKeypad"] is True and numpad_d["location"] == 0
     assert numpad_u["isKeypad"] is True and numpad_u["location"] == 0
+
+
+def test_pipe_cdp_connection_target_crashed_aborts_inflight_and_clears_on_navigate() -> None:
+    import os
+    import threading
+    from invisible_chromium.cdp import CDPError, PipeCDPConnection
+
+    c_read, p_write = os.pipe()
+    p_read, c_write = os.pipe()
+    conn = PipeCDPConnection(p_read, p_write)
+    try:
+        box: list[Exception] = []
+
+        def _inflight() -> None:
+            try:
+                conn.send("Runtime.evaluate", {"expression": "1"}, session_id="S-DEAD", timeout=5.0)
+            except Exception as exc:
+                box.append(exc)
+
+        t = threading.Thread(target=_inflight)
+        t.start()
+        while not conn._pending:
+            pass
+
+        os.write(c_write, b'{"method":"Inspector.targetCrashed","sessionId":"S-DEAD","params":{}}\x00')
+        t.join(timeout=1.0)
+        assert not t.is_alive()
+        assert len(box) == 1 and isinstance(box[0], CDPError)
+        assert "Target crashed" in str(box[0])
+
+        with pytest.raises(CDPError, match="Target crashed"):
+            conn.send("Page.captureScreenshot", {}, session_id="S-DEAD", timeout=1.0)
+
+        # Navigating clears crashed state so Sad Tab recovery succeeds.
+        nav_out: list[dict] = []
+
+        def _nav() -> None:
+            nav_out.append(conn.send("Page.navigate", {"url": "about:blank"}, session_id="S-DEAD", timeout=1.0))
+
+        t2 = threading.Thread(target=_nav)
+        t2.start()
+        while not conn._pending:
+            pass
+        mid = next(iter(conn._pending))
+        os.write(c_write, f'{{"id":{mid},"result":{{"frameId":"F1"}}}}\x00'.encode("utf-8"))
+        t2.join(timeout=1.0)
+        assert nav_out == [{"frameId": "F1"}]
+    finally:
+        for fd in (c_read, c_write):
+            try:
+                os.close(fd)
+            except OSError:
+                pass
+        conn.close()

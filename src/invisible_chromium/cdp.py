@@ -23,10 +23,11 @@ class CDPError(RuntimeError):
 
 
 class _PendingCall:
-    __slots__ = ("method", "event", "result", "error")
+    __slots__ = ("method", "session_id", "event", "result", "error")
 
-    def __init__(self, method: str) -> None:
+    def __init__(self, method: str, session_id: str | None = None) -> None:
         self.method = method
+        self.session_id = session_id
         self.event = threading.Event()
         self.result: dict[str, Any] | None = None
         self.error: Exception | None = None
@@ -45,6 +46,7 @@ class PipeCDPConnection:
         self._state_lock = threading.Lock()
         self._next_id = 0
         self._pending: dict[int, _PendingCall] = {}
+        self._crashed_sessions: set[str] = set()
         self._subscribers: list[EventCallback] = []
         self._closed = False
         self._reader_thread = threading.Thread(
@@ -74,9 +76,26 @@ class PipeCDPConnection:
         with self._state_lock:
             if self._closed:
                 raise RuntimeError(f"CDP pipe is closed while sending {method}")
+            if session_id is not None:
+                if method in (
+                    "Page.navigate",
+                    "Page.reload",
+                    "Page.navigateToHistoryEntry",
+                ):
+                    self._crashed_sessions.discard(session_id)
+                elif session_id in self._crashed_sessions and method not in (
+                    "Page.close",
+                    "Page.bringToFront",
+                    "Page.getNavigationHistory",
+                    "Emulation.setDeviceMetricsOverride",
+                    "Emulation.setEmulatedMedia",
+                ):
+                    raise CDPError(
+                        method, {"code": -32000, "message": "Target crashed"}
+                    )
             self._next_id += 1
             msg_id = self._next_id
-            call = _PendingCall(method)
+            call = _PendingCall(method, session_id)
             self._pending[msg_id] = call
 
         payload: dict[str, Any] = {"id": msg_id, "method": method}
@@ -180,6 +199,19 @@ class PipeCDPConnection:
             return
         session_id = msg.get("sessionId")
         params = msg.get("params") or {}
+        if method == "Inspector.targetCrashed" and session_id:
+            with self._state_lock:
+                self._crashed_sessions.add(session_id)
+            self._fail_session(session_id, "Target crashed")
+        elif method == "Target.detachedFromTarget":
+            detached_sid = params.get("sessionId")
+            if detached_sid:
+                with self._state_lock:
+                    self._crashed_sessions.discard(detached_sid)
+                self._fail_session(detached_sid, "Target closed")
+        elif method == "Page.frameNavigated" and session_id:
+            with self._state_lock:
+                self._crashed_sessions.discard(session_id)
         with self._state_lock:
             callbacks = list(self._subscribers)
         for cb in callbacks:
@@ -187,6 +219,19 @@ class PipeCDPConnection:
                 cb(session_id, method, params)
             except Exception:
                 pass
+
+    def _fail_session(self, session_id: str, message: str) -> None:
+        matched: list[_PendingCall] = []
+        with self._state_lock:
+            for mid, call in list(self._pending.items()):
+                if call.session_id == session_id:
+                    self._pending.pop(mid, None)
+                    matched.append(call)
+        for call in matched:
+            call.error = CDPError(
+                call.method, {"code": -32000, "message": message}
+            )
+            call.event.set()
 
     def _fail_all(self, exc: Exception) -> None:
         with self._state_lock:

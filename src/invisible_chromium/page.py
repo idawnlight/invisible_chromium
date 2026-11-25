@@ -159,6 +159,7 @@ class ChromiumPage:
         self._lifecycle_events: dict[str, set[str]] = {}
         self._lifecycle_cond = threading.Condition()
         self._closed = False
+        self._crashed = False
         self._human = HumanController(
             seed=seed,
             page_number=page_number,
@@ -187,12 +188,18 @@ class ChromiumPage:
             frame = params.get("frame") or {}
             if not frame.get("parentId"):
                 with self._lifecycle_cond:
+                    self._crashed = False
                     self._main_frame_id = frame.get("id", self._main_frame_id)
                     self._utility_context_id = None
                     self._lifecycle_events.setdefault(self._main_frame_id, set()).add(
                         "commit"
                     )
                     self._lifecycle_cond.notify_all()
+        elif method == "Inspector.targetCrashed":
+            with self._lifecycle_cond:
+                self._crashed = True
+                self._utility_context_id = None
+                self._lifecycle_cond.notify_all()
         elif method == "Page.lifecycleEvent":
             fid = params.get("frameId", "")
             name = params.get("name", "")
@@ -246,6 +253,7 @@ class ChromiumPage:
             )
 
         with self._lifecycle_cond:
+            self._crashed = False
             self._utility_context_id = None
             self._lifecycle_events.clear()
 
@@ -260,6 +268,10 @@ class ChromiumPage:
         settled = False
         with self._lifecycle_cond:
             while True:
+                if self._crashed:
+                    raise CDPError(
+                        "Page.navigate", {"code": -32000, "message": "Page crashed"}
+                    )
                 seen = self._lifecycle_events.get(frame_id, set())
                 if target_event in seen:
                     settled = True
@@ -276,13 +288,20 @@ class ChromiumPage:
                 else ("complete",)
             )
             while time.monotonic() < deadline:
+                if self._crashed:
+                    raise CDPError(
+                        "Page.navigate", {"code": -32000, "message": "Page crashed"}
+                    )
                 try:
                     state = self.evaluate_isolated("document.readyState")
                     if state in ready_target:
                         settled = True
                         break
                 except Exception:
-                    pass
+                    if self._crashed:
+                        raise CDPError(
+                            "Page.navigate", {"code": -32000, "message": "Page crashed"}
+                        ) from None
                 time.sleep(0.05)
 
         if not settled:
@@ -294,6 +313,7 @@ class ChromiumPage:
 
     def reload(self, *, wait_until: str = "load", timeout: float = 30.0) -> None:
         with self._lifecycle_cond:
+            self._crashed = False
             self._utility_context_id = None
             self._lifecycle_events.clear()
         self._cdp.send("Page.reload", session_id=self.session_id, timeout=timeout)
@@ -309,6 +329,11 @@ class ChromiumPage:
         deadline = time.monotonic() + timeout
         while time.monotonic() < deadline:
             with self._lifecycle_cond:
+                if self._crashed:
+                    raise CDPError(
+                        "Page.waitForLoadState",
+                        {"code": -32000, "message": "Page crashed"},
+                    )
                 if target_event in self._lifecycle_events.get(self._main_frame_id, set()):
                     return
             if target_event in ("DOMContentLoaded", "load"):

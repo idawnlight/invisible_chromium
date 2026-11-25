@@ -1,7 +1,7 @@
 {
   "schema": 1,
   "engine": "chromium",
-  "tag": "chromium-158.0.8127.36-r1",
+  "tag": "chromium-158.0.8127.36-r2",
   "version": "158.0.8127.36",
   "milestone": 158,
   "source_commit": "14d6f648e8cd7ad750a4044200ce94d3321be260",
@@ -10,9 +10,9 @@
   "assets": {
     "linux-x86_64": {
       "name": "chromium-158.0.8127.36-stealth-linux-x86_64.tar.gz",
-      "url": "https://github.com/idawnlight/chromium_antidetect_patch/releases/download/chromium-158.0.8127.36-r1/chromium-158.0.8127.36-stealth-linux-x86_64.tar.gz",
-      "size_bytes": 242562642,
-      "sha256": "51340512da85051e81df1dd43b1aba8017ed5cd787655d1e4c191f23aa909c4f",
+      "url": "https://github.com/idawnlight/chromium_antidetect_patch/releases/download/chromium-158.0.8127.36-r2/chromium-158.0.8127.36-stealth-linux-x86_64.tar.gz",
+      "size_bytes": 191125030,
+      "sha256": "99eb478dda3fa371a2b2d22cd7aa4da03a312aa45a509ab083c8a67de73766c8",
       "entry_rel": "chrome"
     }
   }
